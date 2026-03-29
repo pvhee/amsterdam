@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Van Trip Weather Map — Western Europe</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #1a1a2e; color: #e0e0e0; }
+  #header {
+    background: linear-gradient(135deg, #16213e, #0f3460);
+    padding: 16px 24px;
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+    border-bottom: 2px solid #e94560;
+  }
+  #header h1 { font-size: 1.4rem; color: #fff; }
+  #header h1 span { color: #e94560; }
+  #header .trip-info { font-size: 0.85rem; color: #a0b4d0; }
+  #controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #controls button {
+    padding: 6px 14px; border: 1px solid #e94560; background: transparent;
+    color: #e94560; border-radius: 20px; cursor: pointer; font-size: 0.8rem; transition: all 0.2s;
+  }
+  #controls button:hover, #controls button.active { background: #e94560; color: #fff; }
+  #legend {
+    position: absolute; bottom: 30px; left: 10px; z-index: 1000;
+    background: rgba(26,26,46,0.92); border-radius: 10px; padding: 12px 16px;
+    border: 1px solid #333; font-size: 0.75rem; max-width: 220px;
+  }
+  #legend h3 { margin-bottom: 6px; color: #e94560; font-size: 0.85rem; }
+  .legend-item { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+  .legend-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+  #map { height: calc(100vh - 60px); width: 100%; }
+  #loading {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    z-index: 2000; background: rgba(26,26,46,0.95); padding: 30px 40px;
+    border-radius: 12px; text-align: center; border: 1px solid #e94560;
+  }
+  #loading .spinner { width: 40px; height: 40px; border: 3px solid #333; border-top-color: #e94560; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 12px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .city-popup { font-family: 'Segoe UI', system-ui, sans-serif; min-width: 280px; }
+  .city-popup h3 { color: #16213e; font-size: 1rem; margin-bottom: 2px; }
+  .city-popup .country { color: #888; font-size: 0.8rem; margin-bottom: 8px; }
+  .city-popup .distance { color: #e94560; font-size: 0.75rem; font-weight: 600; }
+  .forecast-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-top: 8px; }
+  .forecast-day {
+    background: #f0f4ff; border-radius: 6px; padding: 4px 2px; text-align: center; font-size: 0.65rem;
+  }
+  .forecast-day .day-name { font-weight: 700; color: #16213e; margin-bottom: 2px; }
+  .forecast-day .temp-high { color: #e94560; font-weight: 700; font-size: 0.8rem; }
+  .forecast-day .temp-low { color: #6080a0; font-size: 0.7rem; }
+  .forecast-day .icon { font-size: 1.2rem; margin: 2px 0; }
+  .forecast-day .rain { color: #3498db; font-size: 0.6rem; }
+  .best-days { margin-top: 8px; padding: 6px 8px; background: #e8f5e9; border-radius: 6px; font-size: 0.72rem; }
+  .best-days.poor { background: #fce4ec; }
+  .best-days strong { color: #2e7d32; }
+  .best-days.poor strong { color: #c62828; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div>
+    <h1>🗺️ Van Trip <span>Weather Map</span></h1>
+    <div class="trip-info">Departing London N16 7RJ — 30 Mar – 12 Apr 2026 · Up to 1200km radius</div>
+  </div>
+  <div id="controls">
+    <button class="active" data-day="0">All 7 days</button>
+    <button data-day="1">Day 1</button>
+    <button data-day="2">Day 2</button>
+    <button data-day="3">Day 3</button>
+    <button data-day="4">Day 4</button>
+    <button data-day="5">Day 5</button>
+    <button data-day="6">Day 6</button>
+    <button data-day="7">Day 7</button>
+  </div>
+</div>
+
+<div id="map"></div>
+
+<div id="legend">
+  <h3>Weather Score</h3>
+  <div class="legend-item"><div class="legend-dot" style="background:#2ecc71"></div> Great (sunny, warm)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#82e0aa"></div> Good (mild, some sun)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f9e79f"></div> Fair (cloudy, cool)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f0b27a"></div> Mediocre (cool, rain)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#e74c3c"></div> Poor (cold, rainy)</div>
+  <div style="margin-top: 8px; color: #888; font-size: 0.65rem;">
+    Circle size = sunshine hours<br>
+    Click a city for 7-day forecast
+  </div>
+</div>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <div>Loading weather data for 40+ cities...</div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const LONDON = { lat: 51.5548, lon: -0.0752 }; // N16 7RJ approximate
+
+const CITIES = [
+  // UK & Ireland
+  { name: "London", country: "England", lat: 51.5074, lon: -0.1278 },
+  { name: "Brighton", country: "England", lat: 50.8225, lon: -0.1372 },
+  { name: "Bristol", country: "England", lat: 51.4545, lon: -2.5879 },
+  { name: "Cardiff", country: "Wales", lat: 51.4816, lon: -3.1791 },
+  { name: "Birmingham", country: "England", lat: 52.4862, lon: -1.8904 },
+  { name: "Manchester", country: "England", lat: 53.4808, lon: -2.2426 },
+  { name: "Edinburgh", country: "Scotland", lat: 55.9533, lon: -3.1883 },
+  { name: "Dublin", country: "Ireland", lat: 53.3498, lon: -6.2603 },
+  { name: "Cork", country: "Ireland", lat: 51.8969, lon: -8.4863 },
+  // France
+  { name: "Paris", country: "France", lat: 48.8566, lon: 2.3522 },
+  { name: "Bordeaux", country: "France", lat: 44.8378, lon: -0.5792 },
+  { name: "Lyon", country: "France", lat: 45.7640, lon: 4.8357 },
+  { name: "Marseille", country: "France", lat: 43.2965, lon: 5.3698 },
+  { name: "Nice", country: "France", lat: 43.7102, lon: 7.2620 },
+  { name: "Nantes", country: "France", lat: 47.2184, lon: -1.5536 },
+  { name: "Strasbourg", country: "France", lat: 48.5734, lon: 7.7521 },
+  { name: "Toulouse", country: "France", lat: 43.6047, lon: 1.4442 },
+  { name: "Biarritz", country: "France", lat: 43.4832, lon: -1.5586 },
+  // Benelux
+  { name: "Amsterdam", country: "Netherlands", lat: 52.3676, lon: 4.9041 },
+  { name: "Brussels", country: "Belgium", lat: 50.8503, lon: 4.3517 },
+  { name: "Luxembourg", country: "Luxembourg", lat: 49.6116, lon: 6.1319 },
+  { name: "Bruges", country: "Belgium", lat: 51.2093, lon: 3.2247 },
+  // Germany
+  { name: "Cologne", country: "Germany", lat: 50.9375, lon: 6.9603 },
+  { name: "Frankfurt", country: "Germany", lat: 50.1109, lon: 8.6821 },
+  { name: "Hamburg", country: "Germany", lat: 53.5511, lon: 9.9937 },
+  { name: "Munich", country: "Germany", lat: 48.1351, lon: 11.5820 },
+  { name: "Berlin", country: "Germany", lat: 52.5200, lon: 13.4050 },
+  { name: "Stuttgart", country: "Germany", lat: 48.7758, lon: 9.1829 },
+  { name: "Freiburg", country: "Germany", lat: 47.9990, lon: 7.8421 },
+  // Switzerland & Austria
+  { name: "Zurich", country: "Switzerland", lat: 47.3769, lon: 8.5417 },
+  { name: "Geneva", country: "Switzerland", lat: 46.2044, lon: 6.1432 },
+  { name: "Innsbruck", country: "Austria", lat: 47.2692, lon: 11.4041 },
+  // Iberia (within ~1200km)
+  { name: "San Sebastián", country: "Spain", lat: 43.3183, lon: -1.9812 },
+  { name: "Barcelona", country: "Spain", lat: 41.3874, lon: 2.1686 },
+  { name: "Bilbao", country: "Spain", lat: 43.2630, lon: -2.9350 },
+  // Scandinavia (within ~1200km)
+  { name: "Copenhagen", country: "Denmark", lat: 55.6761, lon: 12.5683 },
+  // Italy (northern, within ~1200km)
+  { name: "Milan", country: "Italy", lat: 45.4642, lon: 9.1900 },
+  { name: "Turin", country: "Italy", lat: 45.0703, lon: 7.6869 },
+  // Normandy / Brittany
+  { name: "Normandy (Caen)", country: "France", lat: 49.1829, lon: -0.3707 },
+  { name: "Saint-Malo", country: "France", lat: 48.6493, lon: -2.0070 },
+  { name: "Mont Saint-Michel", country: "France", lat: 48.6361, lon: -1.5115 },
+];
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// Filter cities within 1200km
+const cities = CITIES.map(c => ({
+  ...c,
+  distance: Math.round(haversineKm(LONDON.lat, LONDON.lon, c.lat, c.lon))
+})).filter(c => c.distance <= 1200);
+
+// Weather code to emoji + description
+function weatherInfo(code) {
+  const map = {
+    0: ["☀️","Clear sky"], 1: ["🌤️","Mainly clear"], 2: ["⛅","Partly cloudy"], 3: ["☁️","Overcast"],
+    45: ["🌫️","Fog"], 48: ["🌫️","Rime fog"],
+    51: ["🌦️","Light drizzle"], 53: ["🌦️","Drizzle"], 55: ["🌧️","Heavy drizzle"],
+    56: ["🌧️","Freezing drizzle"], 57: ["🌧️","Heavy freezing drizzle"],
+    61: ["🌧️","Light rain"], 63: ["🌧️","Rain"], 65: ["🌧️","Heavy rain"],
+    66: ["🌧️","Freezing rain"], 67: ["🌧️","Heavy freezing rain"],
+    71: ["🌨️","Light snow"], 73: ["🌨️","Snow"], 75: ["🌨️","Heavy snow"],
+    77: ["🌨️","Snow grains"],
+    80: ["🌦️","Light showers"], 81: ["🌧️","Showers"], 82: ["⛈️","Heavy showers"],
+    85: ["🌨️","Snow showers"], 86: ["🌨️","Heavy snow showers"],
+    95: ["⛈️","Thunderstorm"], 96: ["⛈️","Thunderstorm + hail"], 99: ["⛈️","Thunderstorm + heavy hail"],
+  };
+  return map[code] || ["❓","Unknown"];
+}
+
+// Score: higher = better for van trip (0-100)
+function weatherScore(tempMax, tempMin, rain, sunshine, weatherCode) {
+  let score = 50;
+  // Temperature (ideal: 15-25°C)
+  if (tempMax >= 15 && tempMax <= 25) score += 20;
+  else if (tempMax >= 10 && tempMax < 15) score += 10;
+  else if (tempMax >= 25 && tempMax <= 30) score += 10;
+  else if (tempMax < 5) score -= 15;
+  else if (tempMax < 10) score -= 5;
+  // Rain
+  if (rain < 1) score += 20;
+  else if (rain < 5) score += 10;
+  else if (rain < 10) score -= 5;
+  else score -= 20;
+  // Sunshine
+  if (sunshine > 8) score += 15;
+  else if (sunshine > 5) score += 10;
+  else if (sunshine > 3) score += 5;
+  else score -= 10;
+  // Weather code penalties
+  if (weatherCode >= 95) score -= 15;
+  else if (weatherCode >= 61) score -= 10;
+  return Math.max(0, Math.min(100, score));
+}
+
+function scoreColor(score) {
+  if (score >= 80) return "#2ecc71";
+  if (score >= 65) return "#82e0aa";
+  if (score >= 50) return "#f9e79f";
+  if (score >= 35) return "#f0b27a";
+  return "#e74c3c";
+}
+
+function scoreLabel(score) {
+  if (score >= 80) return "Great";
+  if (score >= 65) return "Good";
+  if (score >= 50) return "Fair";
+  if (score >= 35) return "Mediocre";
+  return "Poor";
+}
+
+// Init map
+const map = L.map('map', { zoomControl: true }).setView([49.5, 3], 5);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© OpenStreetMap © CARTO',
+  maxZoom: 18
+}).addTo(map);
+
+// Draw 1200km radius circle
+L.circle([LONDON.lat, LONDON.lon], {
+  radius: 1200000, color: '#e94560', fillColor: '#e94560',
+  fillOpacity: 0.04, weight: 1.5, dashArray: '8,6'
+}).addTo(map);
+
+// London marker
+L.marker([LONDON.lat, LONDON.lon], {
+  icon: L.divIcon({
+    html: '<div style="background:#e94560;color:#fff;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.4);">🏠 London N16</div>',
+    className: '', iconAnchor: [50, 12]
+  })
+}).addTo(map);
+
+let allMarkers = [];
+let cityData = [];
+let selectedDay = 0; // 0 = all days average
+
+async function fetchWeather(city) {
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,sunshine_duration,weathercode&timezone=Europe%2FLondon&forecast_days=7`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed for ${city.name}`);
+  return res.json();
+}
+
+async function loadAll() {
+  const batchSize = 8;
+  const results = [];
+  for (let i = 0; i < cities.length; i += batchSize) {
+    const batch = cities.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map(async (city) => {
+      try {
+        const data = await fetchWeather(city);
+        return { city, weather: data.daily };
+      } catch (e) {
+        console.warn(`Skipping ${city.name}:`, e);
+        return null;
+      }
+    }));
+    results.push(...batchResults.filter(Boolean));
+  }
+  return results;
+}
+
+const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function buildPopup(item) {
+  const { city, weather } = item;
+  const days = weather.time.map((t, i) => {
+    const d = new Date(t + 'T00:00:00');
+    const [icon, desc] = weatherInfo(weather.weathercode[i]);
+    const sunHrs = (weather.sunshine_duration[i] / 3600).toFixed(1);
+    const score = weatherScore(
+      weather.temperature_2m_max[i], weather.temperature_2m_min[i],
+      weather.precipitation_sum[i], weather.sunshine_duration[i]/3600, weather.weathercode[i]
+    );
+    return { date: d, dayName: dayNames[d.getDay()], dateStr: `${d.getDate()}/${d.getMonth()+1}`,
+      icon, desc, high: weather.temperature_2m_max[i], low: weather.temperature_2m_min[i],
+      rain: weather.precipitation_sum[i], sunHrs, score };
+  });
+
+  const bestDay = days.reduce((a,b) => a.score > b.score ? a : b);
+  const avgScore = Math.round(days.reduce((s,d) => s + d.score, 0) / days.length);
+
+  let html = `<div class="city-popup">
+    <h3>${city.name}</h3>
+    <div class="country">${city.country} · <span class="distance">${city.distance} km from London</span></div>
+    <div class="forecast-grid">`;
+
+  days.forEach(d => {
+    html += `<div class="forecast-day" style="border-bottom:3px solid ${scoreColor(d.score)}">
+      <div class="day-name">${d.dayName} ${d.dateStr}</div>
+      <div class="icon">${d.icon}</div>
+      <div class="temp-high">${Math.round(d.high)}°</div>
+      <div class="temp-low">${Math.round(d.low)}°</div>
+      <div class="rain">💧${d.rain.toFixed(1)}mm</div>
+      <div style="font-size:0.6rem;color:#888">☀${d.sunHrs}h</div>
+    </div>`;
+  });
+
+  const cls = avgScore >= 50 ? "best-days" : "best-days poor";
+  html += `</div>
+    <div class="${cls}">
+      <strong>Overall: ${scoreLabel(avgScore)} (${avgScore}/100)</strong> · Best day: ${bestDay.dayName} ${bestDay.dateStr} (${bestDay.score}/100)
+    </div></div>`;
+  return html;
+}
+
+function renderMarkers(dayIndex) {
+  allMarkers.forEach(m => map.removeLayer(m));
+  allMarkers = [];
+
+  cityData.forEach(item => {
+    const { city, weather } = item;
+    let score, sunHrs, tempMax, rain;
+
+    if (dayIndex === 0) {
+      // Average across all 7 days
+      const scores = weather.time.map((_, i) => weatherScore(
+        weather.temperature_2m_max[i], weather.temperature_2m_min[i],
+        weather.precipitation_sum[i], weather.sunshine_duration[i]/3600, weather.weathercode[i]
+      ));
+      score = Math.round(scores.reduce((a,b) => a+b, 0) / scores.length);
+      sunHrs = (weather.sunshine_duration.reduce((a,b) => a+b, 0) / 3600 / 7).toFixed(1);
+      tempMax = Math.round(weather.temperature_2m_max.reduce((a,b) => a+b, 0) / 7);
+      rain = (weather.precipitation_sum.reduce((a,b) => a+b, 0) / 7).toFixed(1);
+    } else {
+      const i = dayIndex - 1;
+      score = weatherScore(
+        weather.temperature_2m_max[i], weather.temperature_2m_min[i],
+        weather.precipitation_sum[i], weather.sunshine_duration[i]/3600, weather.weathercode[i]
+      );
+      sunHrs = (weather.sunshine_duration[i] / 3600).toFixed(1);
+      tempMax = Math.round(weather.temperature_2m_max[i]);
+      rain = weather.precipitation_sum[i].toFixed(1);
+    }
+
+    const color = scoreColor(score);
+    const radius = Math.max(12, Math.min(30, sunHrs * 3.5));
+
+    const marker = L.circleMarker([city.lat, city.lon], {
+      radius: radius, fillColor: color, color: '#fff',
+      weight: 1.5, opacity: 0.9, fillOpacity: 0.8
+    }).addTo(map);
+
+    // Label
+    const label = L.marker([city.lat, city.lon], {
+      icon: L.divIcon({
+        html: `<div style="text-align:center;text-shadow:0 1px 4px rgba(0,0,0,0.9);pointer-events:none;">
+          <div style="font-size:11px;font-weight:700;color:#fff;">${city.name}</div>
+          <div style="font-size:10px;color:${color};font-weight:700;">${tempMax}° · ${rain}mm</div>
+        </div>`,
+        className: '', iconAnchor: [30, -radius - 2], iconSize: [60, 30]
+      })
+    }).addTo(map);
+
+    marker.bindPopup(buildPopup(item), { maxWidth: 360 });
+    allMarkers.push(marker, label);
+  });
+}
+
+// Day selector buttons
+document.querySelectorAll('#controls button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#controls button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedDay = parseInt(btn.dataset.day);
+    renderMarkers(selectedDay);
+  });
+});
+
+// Load and render
+loadAll().then(data => {
+  cityData = data;
+  document.getElementById('loading').style.display = 'none';
+  renderMarkers(0);
+
+  // Sort by avg score for console summary
+  const ranked = data.map(item => {
+    const scores = item.weather.time.map((_, i) => weatherScore(
+      item.weather.temperature_2m_max[i], item.weather.temperature_2m_min[i],
+      item.weather.precipitation_sum[i], item.weather.sunshine_duration[i]/3600, item.weather.weathercode[i]
+    ));
+    return { name: item.city.name, country: item.city.country, avg: Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) };
+  }).sort((a,b) => b.avg - a.avg);
+
+  console.log("🏆 Top destinations by weather score:");
+  ranked.slice(0, 10).forEach((c, i) => console.log(`${i+1}. ${c.name} (${c.country}) — ${c.avg}/100`));
+}).catch(err => {
+  document.getElementById('loading').innerHTML = `<div style="color:#e94560">Error loading weather data. Please refresh.</div>`;
+  console.error(err);
+});
+</script>
+</body>
+</html>
