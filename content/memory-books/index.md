@@ -1,5 +1,5 @@
 ---
-title: "Memory Books: How Knowledge Graphs Give Runbooks a Brain"
+title: "From Runbooks to Memory Books: Building the Knowledge Layer One Run at a Time"
 date: 2026-04-10
 tags: [BLOK, Cutover, knowledge-graph, AI, runbooks, memory, agentic-AI]
 ---
